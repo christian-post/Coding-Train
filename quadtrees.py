@@ -1,0 +1,213 @@
+import pygame as pg
+import traceback
+from random import randrange, uniform
+
+vec = pg.math.Vector2
+
+WIDTH = 800
+HEIGHT = 800
+
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+RED = (255, 0, 0)
+
+
+class Point(vec):
+    '''
+    subclass of Vector2 with reference to a sprite
+    '''
+    def __init__(self, pos, data=None):
+        super().__init__()
+        self.x = pos[0]
+        self.y = pos[1]
+        self.data = data
+        
+
+
+class Circle(pg.sprite.Sprite):
+    def __init__(self, pos, diameter):
+        pg.sprite.Sprite.__init__(self)
+        self.pos = vec(pos)
+        self.image = pg.Surface((diameter, diameter), pg.SRCALPHA)
+        self.color = WHITE
+        self.radius = diameter // 2
+        self.rect = self.image.get_rect()
+        self.rect.center = self.pos
+        self.dir = vec(uniform(-1, 1), uniform(-1, 1))
+        
+    
+    def update(self, others):
+        # move
+        self.pos += self.dir
+        self.rect.center = self.pos
+        
+        # screen wrap
+        if self.pos.x < 0:
+            self.pos.x = WIDTH
+        elif self.pos.x > WIDTH:
+            self.pos.x = 0
+            
+        if self.pos.y < 0:
+            self.pos.y = HEIGHT
+        elif self.pos.y > HEIGHT:
+            self.pos.y = 0
+        
+        # check collision
+        for other in others:
+            if other != self:
+                dist = other.pos - self.pos
+                if dist.length_squared() < (self.radius + other.radius) ** 2:
+                    self.color = RED
+    
+    
+    def draw(self, screen):
+        pg.draw.circle(self.image, self.color, (self.radius, self.radius), self.radius)
+        screen.blit(self.image, self.rect.topleft)
+        self.color = WHITE
+        
+        
+
+class Quadtree:
+    def __init__(self, boundary, capacity):
+        # boundary has to be a pg.Rect object
+        if not isinstance(boundary, pg.Rect):
+            print('boundary has to be a Rect object')
+        self.boundary = boundary
+        self.capacity = capacity
+        self.points = []
+        self.divided = False
+    
+    
+    def subdivide(self):
+        x = self.boundary.x
+        y = self.boundary.y
+        w = self.boundary.w / 2
+        h = self.boundary.h / 2
+        
+        ne = pg.Rect(x, y, w, h)
+        self.northeast = Quadtree(ne, self.capacity)
+        nw = pg.Rect(x + w, y, w, h)
+        self.northwest = Quadtree(nw, self.capacity)
+        se = pg.Rect(x, y + h, w, h)
+        self.southeast = Quadtree(se, self.capacity)
+        sw = pg.Rect(x + w, y + h, w, h)
+        self.southwest = Quadtree(sw, self.capacity)
+        
+        self.divided = True
+        
+    
+    def insert(self, point):
+        if not self.boundary.collidepoint(point):
+            return False
+        
+        if len(self.points) < self.capacity:
+            self.points.append(point)
+            return True
+        
+        if not self.divided:
+            self.subdivide()
+            
+        return (self.northeast.insert(point) or self.northwest.insert(point)
+                or self.southeast.insert(point) or self.southwest.insert(point))
+        
+        
+    def query(self, rect, found=False):
+        if not found:
+            found = []
+            
+        if not rect.colliderect(self.boundary):
+            return found
+        
+        for p in self.points:
+            if rect.collidepoint(p):
+                found.append(p.data)
+                
+        if self.divided:
+            self.northwest.query(rect, found)
+            self.northeast.query(rect, found)
+            self.southwest.query(rect, found)
+            self.southeast.query(rect, found)
+            
+        return found
+    
+    
+    def draw(self, screen):
+        pg.draw.rect(screen, (100, 100, 100), self.boundary, 1)
+        
+        if self.divided:
+            self.northwest.draw(screen)
+            self.northeast.draw(screen)
+            self.southwest.draw(screen)
+            self.southeast.draw(screen)
+
+    
+
+# initialize pygame
+pg.init()
+screen = pg.display.set_mode((WIDTH, HEIGHT))
+clock = pg.time.Clock()
+
+sprites = []
+qt_on = True
+
+screen.fill(BLACK)
+
+for i in range(100):
+    c = Circle((randrange(WIDTH), randrange(HEIGHT)), 20)
+    sprites.append(c)
+    
+
+# game loop
+running = True
+try:
+    while running:
+        clock.tick(60)
+        for event in pg.event.get():
+            if event.type == pg.QUIT:
+                running = False
+            
+            if event.type == pg.KEYUP:
+                if event.key == pg.K_q:
+                    qt_on = not qt_on
+                    
+        screen.fill(BLACK)
+        
+        qt = Quadtree(pg.Rect(0, 0, WIDTH, HEIGHT), 4)
+        for s in sprites:
+            qt.insert(Point(s.pos, s))
+        
+        if qt_on:
+            qt.draw(screen)         
+        
+        for s in sprites:
+            if not qt_on:
+                s.update(sprites)
+            else:
+                rect = pg.Rect(s.pos, (100, 100))
+                rect.center = s.pos
+                #pg.draw.rect(screen, (0, 255, 0), rect, 1)
+                neighbors = qt.query(rect)
+                s.update(neighbors)
+            s.draw(screen)
+            
+        mouse_rect = pg.Rect(0, 0, 100, 100)
+        mouse_rect.center = pg.mouse.get_pos()
+        pg.draw.rect(screen, (0, 255, 0), mouse_rect, 1)
+        
+        mouse_points = qt.query(mouse_rect)
+        for sprite in mouse_points:
+            sprite.color = RED
+        
+            
+        caption = ('points in tree: %03d' % len(qt.query(pg.Rect(0, 0, WIDTH, HEIGHT))) + 
+                   '    Quadtree on: ' + str(qt_on) +
+                   '    FPS: ' + str(round(clock.get_fps(), 2)))
+        pg.display.set_caption(caption)
+    
+
+        pg.display.update()
+    
+    pg.quit()
+except Exception:
+    traceback.print_exc()
+    pg.quit()
