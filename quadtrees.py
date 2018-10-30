@@ -11,26 +11,16 @@ WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 RED = (255, 0, 0)
 
-
-class Point(vec):
-    '''
-    subclass of Vector2 with reference to a sprite
-    '''
-    def __init__(self, pos, data=None):
-        super().__init__()
-        self.x = pos[0]
-        self.y = pos[1]
-        self.data = data
-        
+NO_OF_SPRITES = 500
 
 
 class Circle(pg.sprite.Sprite):
-    def __init__(self, pos, diameter):
+    def __init__(self, pos, radius):
         pg.sprite.Sprite.__init__(self)
         self.pos = vec(pos)
-        self.image = pg.Surface((diameter, diameter), pg.SRCALPHA)
+        self.image = pg.Surface((radius * 2, radius * 2), pg.SRCALPHA)
         self.color = WHITE
-        self.radius = diameter // 2
+        self.radius = radius
         self.rect = self.image.get_rect()
         self.rect.center = self.pos
         self.dir = vec(uniform(-1, 1), uniform(-1, 1))
@@ -61,7 +51,8 @@ class Circle(pg.sprite.Sprite):
     
     
     def draw(self, screen):
-        pg.draw.circle(self.image, self.color, (self.radius, self.radius), self.radius)
+        pg.draw.circle(self.image, self.color, (self.radius, self.radius), 
+                                                               self.radius)
         screen.blit(self.image, self.rect.topleft)
         self.color = WHITE
         
@@ -74,7 +65,7 @@ class Quadtree:
             print('boundary has to be a Rect object')
         self.boundary = boundary
         self.capacity = capacity
-        self.points = []
+        self.sprites = []
         self.divided = False
     
     
@@ -96,38 +87,38 @@ class Quadtree:
         self.divided = True
         
     
-    def insert(self, point):
-        if not self.boundary.collidepoint(point):
+    def insert(self, sprite):
+        if not self.boundary.collidepoint(sprite.pos):
             return False
         
-        if len(self.points) < self.capacity:
-            self.points.append(point)
+        if len(self.sprites) < self.capacity:
+            self.sprites.append(sprite)
             return True
         
         if not self.divided:
             self.subdivide()
             
-        return (self.northeast.insert(point) or self.northwest.insert(point)
-                or self.southeast.insert(point) or self.southwest.insert(point))
+        return (self.northeast.insert(sprite) or self.northwest.insert(sprite)
+                or self.southeast.insert(sprite) or self.southwest.insert(sprite))
         
         
-    def query(self, rect, found=False):
-        if not found:
+    def query(self, rect, found=None):
+        if found == None:
             found = []
             
         if not rect.colliderect(self.boundary):
             return found
         
-        for p in self.points:
-            if rect.collidepoint(p):
-                found.append(p.data)
+        for s in self.sprites:
+            if rect.collidepoint(s.pos):
+                found.append(s)
                 
         if self.divided:
             self.northwest.query(rect, found)
             self.northeast.query(rect, found)
             self.southwest.query(rect, found)
             self.southeast.query(rect, found)
-            
+
         return found
     
     
@@ -149,14 +140,17 @@ clock = pg.time.Clock()
 
 sprites = []
 qt_on = True
+mouse_up = False
 
-screen.fill(BLACK)
+# define rects for the Quadtree and for each sprite
+qt_rect = pg.Rect((0, 0), (WIDTH, HEIGHT))
+query_rect = pg.Rect((0, 0), (60, 60))
 
-for i in range(100):
-    c = Circle((randrange(WIDTH), randrange(HEIGHT)), 20)
+# instantiate the sprites
+for i in range(NO_OF_SPRITES):
+    c = Circle((randrange(WIDTH), randrange(HEIGHT)), 10)
     sprites.append(c)
     
-
 # game loop
 running = True
 try:
@@ -172,9 +166,11 @@ try:
                     
         screen.fill(BLACK)
         
-        qt = Quadtree(pg.Rect(0, 0, WIDTH, HEIGHT), 4)
+        # make a new empty Quadtree
+        qt = Quadtree(qt_rect, 4)
+        # add each sprite to the tree
         for s in sprites:
-            qt.insert(Point(s.pos, s))
+            qt.insert(s)
         
         if qt_on:
             qt.draw(screen)         
@@ -183,28 +179,26 @@ try:
             if not qt_on:
                 s.update(sprites)
             else:
-                rect = pg.Rect(s.pos, (100, 100))
-                rect.center = s.pos
-                #pg.draw.rect(screen, (0, 255, 0), rect, 1)
-                neighbors = qt.query(rect)
+                query_rect.center = s.pos 
+                #pg.draw.rect(screen, (0, 255, 0), query_rect, 1)
+                neighbors = qt.query(query_rect)
                 s.update(neighbors)
             s.draw(screen)
-            
-        mouse_rect = pg.Rect(0, 0, 100, 100)
-        mouse_rect.center = pg.mouse.get_pos()
-        pg.draw.rect(screen, (0, 255, 0), mouse_rect, 1)
         
+        # paint all sprites red that are in a Rect around the mouse cursor
+        mouse_rect = pg.Rect(0, 0, 200, 200)
+        mouse_rect.center = pg.mouse.get_pos()
+        pg.draw.rect(screen, (0, 255, 0), mouse_rect, 1)      
         mouse_points = qt.query(mouse_rect)
         for sprite in mouse_points:
             sprite.color = RED
-        
-            
-        caption = ('points in tree: %03d' % len(qt.query(pg.Rect(0, 0, WIDTH, HEIGHT))) + 
-                   '    Quadtree on: ' + str(qt_on) +
-                   '    FPS: ' + str(round(clock.get_fps(), 2)))
+                 
+        caption = ('    Quadtree on: ' + str(qt_on) +
+                   '    FPS: ' + str(round(clock.get_fps(), 2)) +
+                   '    Points in Tree: %03d' % len(qt.query(pg.Rect(0, 0, 
+                                                            WIDTH, HEIGHT))))
         pg.display.set_caption(caption)
     
-
         pg.display.update()
     
     pg.quit()
